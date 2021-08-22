@@ -1,7 +1,7 @@
 ###Note about design patterns
 ###My code utilizes the abstract factory, builder, and facade pattern types.
 
-from sqlalchemy import Column, Integer, Float, String
+from sqlalchemy import Column, Integer, Float, String, DateTime
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -15,8 +15,7 @@ from sqlalchemy.sql.sqltypes import Boolean, PickleType
 engine = create_engine('sqlite:///:memory:', echo=False)
 Base = declarative_base()
 
-activeEmployee = 2
-activeCustomer = 1    
+
 lastOrderNumber = 543210   
 lastIDassign = 123456
 
@@ -49,7 +48,8 @@ class InventoryItem(Base):
 
 
 class Person(Base):
-    def __init__(self, firstName, lastName, phoneNumber, streetAddress, idNumber):
+    def __init__(self, personType, firstName, lastName, phoneNumber, streetAddress, idNumber):
+        self.personType = personType
         self.firstName = firstName
         self.lastName = lastName
         self.phoneNumber = phoneNumber
@@ -59,6 +59,7 @@ class Person(Base):
     __tablename__ = 'people'
 
     id = Column(Integer, primary_key=True)
+    personType = Column(String)
     firstName = Column(String)
     lastName = Column(String)
     phoneNumber = Column(String)
@@ -66,16 +67,15 @@ class Person(Base):
     idNumber = Column(String)
 
 
+
     def __repr__(self):
         return "{} {}, {} {}".format(self.firstName, self.lastName, self.get_role(), self.idNumber)
 
     def get_role(self):
-        if self.personType == "Employee":
-            return "Employee"
-        elif self.pastOrders:
-            return "Existing Customer"
+        if self.personType == "employee":
+            return "employee"
         else:
-            return "New Customer"
+            return "customer"
 
     def get_orders(self):
         orders = session.query(Orders).filer_by()
@@ -86,20 +86,16 @@ class Person(Base):
 
 class Customer(Person):
     def __init__(self,
+                 personType,
                  firstName,
                  lastName,
                  phoneNumber,
                  address,
-                 idNumber,
-                 paymentMethod):
-        self.paymentMethod = paymentMethod
-        self.personType = "Customer"
-        super().__init__(firstName, lastName, phoneNumber, address, idNumber)
+                 idNumber):
+        self.paymentMethod = 0
+        super().__init__(personType, firstName, lastName, phoneNumber, address, idNumber)
 
-    def createOrder(self):
-        orderNumber = lastOrderNumber + 1
-        self.assignOrder(self, orderNumber)
-        session.add(Order(orderNumber, datetime.now(), self.idNumber, 0, []))
+
 
 
 
@@ -115,6 +111,7 @@ class Customer(Person):
 
 class Employee(Person):
     def __init__(self,
+                 personType,
                  firstName,
                  lastName,
                  phoneNumber,
@@ -124,47 +121,47 @@ class Employee(Person):
                  payRate):
         self.position = position
         self.payRate = payRate
-        self.personType = "Employee"
-        super().__init__(firstName, lastName, phoneNumber, address, idNumber)
+        super().__init__(personType, firstName, lastName, phoneNumber, address, idNumber)
 
     
 # Abstract factory for creating people (customers or employees)
 class PeopleFactory(object):
     @classmethod
-    def create(cls, name, *args):
-        name = name.lower().strip()
+    def create(cls, type, *args):
+        type = type.lower().strip()
         
-        if name == 'customer':
-            return Customer(*args)
-        elif name == 'employee':
-            return Employee(*args)
+        if type == 'customer':
+            return Customer(type, *args)
+        elif type == 'employee':
+            return Employee(type, *args)
 
-class Order():
+class Order(Base):
     def __init__(self, orderNumber, orderTime, customer, employee, orderItems):
         self.orderNumber = orderNumber
         self.orderTime = orderTime
         self.customer = customer
         self.employee = employee
         self.orderItems = orderItems
+        self.paymentInfo = 0
         self.orderPaid = False
         self.cookingComplete = False
         self.orderComplete = False
 
     def __repr__(self):
+        emp=session.query(Employee).filter_by(idNumber=self.employee).first()
+        cus=session.query(Customer).filter_by(idNumber=self.customer).first()
         return """            Order Number: {}
-            Name: {} {}
-            Employee: {} {} 
-            Order Delivered: {}
+            Name: {}
+            Employee: {}
             Order Paid: {}
             Order Cooked: {}
-            Order Items: {}""".format(self.orderNumber, 
-            self.customer.firstName, 
-            self.customer.lastName, 
-            self.employee.firstName, 
-            self.employee.lastName, 
-            self.orderDelivered,
+            Order Complete: {}
+            Order Items: {}""".format(str(self.orderNumber), 
+            cus.firstName, 
+            emp.firstName,
             self.orderPaid,
             self.cookingComplete,
+            self.orderComplete,
             self.orderItems)
 
     __tablename__ = "orders"
@@ -178,6 +175,7 @@ class Order():
     orderPaid = Column(Boolean)
     cookingComplete = Column(Boolean)
     orderComplete = Column(Boolean)
+    paymentInfo = Column(String)
 
 
     def addOrderItem(self, orderItem):
@@ -193,12 +191,27 @@ class Order():
         self.orderDelivered = True
         self.customer.pastOrders.append(self.customer.currentOrders.pop(self))
 
-    def payOrder(self):
+    def payOrder(self, CCinfo):
         self.orderPaid = True
+        self.paymentInfo = CCinfo
+
+    def printItems(self):
+        items = self.orderItems
+        for index in range(len(items)):
+            print(items[index])
+    
+    def getSubtotal(self):
+        items = self.orderItems
+        subtotal = 0
+        for index in range(len(items)):
+            itemTotal = (items[index].foodPrice * items[index].foodQty)
+            subtotal = subtotal + itemTotal
+
+        return subtotal
         
 # Facade for creating new orders     
 class OrderBuilder(object):
-    def __init__(self, employee, customer, orderNumber, orderTime, orderItems):
+    def __init__(self, customer, employee, orderNumber, orderTime, orderItems):
         self.customer = customer
         self.employee = employee
         self.orderNumber = orderNumber
@@ -276,8 +289,8 @@ class Food():
         self.foodQty = foodQty
         self.foodPrice = foodPrice
 
-    def __str__(self):
-        return "{} {}(s) on {} with {} for {}".format(self.foodQty, 
+    def __repr__(self):
+        return "{} {}(s) on {} with {} for {} each".format(self.foodQty, 
                                                             self.foodType, 
                                                             self.carbBase, 
                                                             self.foodToppings, 
@@ -320,21 +333,20 @@ def createAccount():
     zipcode = input("ZIP Code: ")
     lastIDassign += 1
     idnumber = lastIDassign + 1
-    session.add(PeopleFactory.create('customer', fname, lname, pnumber, str(address1 + address2 + city + zipcode), idnumber, 0))
+    user=PeopleFactory.create('customer', fname, lname, pnumber, str(address1 + address2 + city + zipcode), idnumber)
+    session.add(user)
     print("\n\nWelcome, {}!\n\nYour have successfully created a new account.\n\nYour new UserID is {}.".format(fname, idnumber))
     time.sleep(3)
-    welcome()
+    welcome(user)
 
-def orderInput():
-    print("\n\nPlace an Order\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\n")
+def login():
+    global activeEmployee
+    session.add(PeopleFactory.create('customer', 'fname', 'lname', 'pnumber', '1017 raymond ave', 1))
+    session.add(PeopleFactory.create('employee', 'efname', 'elname', 'pnumber', '1017 raymond ave', 2, 'Manager', 24.57))
+    activeEmployee = session.query(Employee).filter_by(idNumber='2').first()
 
-
-def welcome():
-    session.add(PeopleFactory.create('customer', 'fname', 'lname', 'pnumber', '1017 raymond ave', 1, [], [], 0))
-    session.add(PeopleFactory.create('employee', 'efname', 'elname', 'pnumber', '1017 raymond ave', 2, [], [], 'Manager', 24.57))
     activeCustomer = session.query(Customer).filter_by(idNumber='1').first()
-    activeEmployee = session.query(Person).filter_by(idNumber='2').first()
-    global lastOrderNumber
+    
     login = input('\n\nWelcome to The Pizza Palace!\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\nPlease enter your user ID, or press enter to create a new account: ')
     if login == '':
         createAccount()
@@ -342,12 +354,136 @@ def welcome():
     if user == None:
         print("\n\nError: No user found with ID {}.\n\nPlease try again.".format(login))
         time.sleep(2)
-        welcome()
+        login()
+    else:
+        welcome(user)
+
+def welcome(user):
+    global lastOrderNumber
+
+    
 
     placeOrTrack = input('\n\nWelcome back, {}!\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\nWould you like to place a [N]ew order or [T]rack an existing order?\n\nPlease enter N or T: '.format(user.firstName))
     if placeOrTrack in ['n', 'N']:
-        lastOrderNumber += 1
-        session.add(OrderBuilder(activeCustomer, activeEmployee, lastOrderNumber, datetime.datetime.now(), []).create())
+        lastOrderNumber = lastOrderNumber + 1
+        orderNumber = lastOrderNumber
+        createOrder(orderNumber, user, activeEmployee)
+    elif placeOrTrack in ['t', 'T']:
+        tracker(user)
+
+def tracker(user):
+    orders = session.query(Order).filter_by(customer=user.idNumber).all()
+    print("\nOrder Tracker\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\nYour Current Order(s):\n\n")
+    if len(orders) < 1:
+        print("\nNo active orders.\n")
+    else:
+        for order in range(len(orders)):
+            print(orders[order])
+            print("\n\n")
+    time.sleep(3)
+    welcome(user)
+
+def createOrder(orderNumber, activeCustomer, activeEmployee):
+    activeOrder = OrderBuilder(activeCustomer.idNumber, activeEmployee.idNumber, orderNumber, datetime.datetime.now(), []).create()
+    print("\n\nNew Order\n~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+    if activeOrder.orderItems == []:
+        addItem(activeOrder)
+
+def addItem(order):
+    options=[1, 2, 3]
+    foodtype = input("\nWould you like to add a [P]izza or a [S]andwich? ")
+    if foodtype in ['p', 'P']:
+        carbBase=int(input("What kind of crust?\n\n1. Hand Tossed\n2. Deep Dish\n3. Gluten Free\n\n\nEnter Selection: "))
+        while carbBase not in options:
+            carbBase=int(input("Error: Invalid Selection. \n\n\n1. Hand Tossed\n2. Deep Dish\n3. Gluten Free\n\n\Enter Selection: "))
+        if carbBase == 1:
+            carbBase = 'Hand Tossed'
+        elif carbBase == 2:
+            carbBase = 'Deep Dish'
+        elif carbBase == 3:
+            carbBase = 'Gluten Free'
+        print(carbBase)
+        toppings=int(input("Please choose a topping:\n\n\n1. Pepperoni\n2. Sausage\n3. Cheese\n\n\nEnter Selection: "))
+        while toppings not in options:
+            toppings=int(input("Error: Invalid Selection.\n\n\n1. Pepperoni\n2. Sausage\n3. Cheese\n\n\nEnter Selection: "))
+        if toppings == 1:
+            toppings = 'Pepperoni'
+        elif toppings == 2:
+            toppings = 'Sausage'
+        elif toppings == 3:
+            toppings = 'Cheese'
+        print(toppings)
+        quantity=int(input("How many do you want?\n\nEnter Number: "))
+        while quantity < 1 or quantity > 99:
+            quantity=int(input("Error: Invalid Number\n\nPleae enter a number between 1 and 99.\n\nEnter Number: "))
+        if quantity == 1:
+            print("\nYou want {} {} {} pizza?".format(quantity, carbBase, toppings))
+        else:
+            print("\nYou want {} {} {} pizzas?".format(quantity, carbBase, toppings))
+        confirm=input("Enter Y to confirm or N to start over: ")
+        if confirm in ['n','N']:
+            addItem(order)
+        if confirm in ['y','Y']:
+            pizza=PizzaDirector.construct(carbBase,toppings, quantity, 9.99)
+            order.addOrderItem(pizza)
+    elif foodtype in ['s','S']:
+        carbBase=int(input("What kind of bread?\n\n\n1. White\n2. Wheat\n3. Sourdough\n\n\nEnter Selection: "))
+        while carbBase not in options:
+            carbBase=int(input("Error: Invalid Selection. \n\n\n1. White\n2. Wheat\n3. Sourdough\n\n\Enter Selection: "))
+        if carbBase == 1:
+            carbBase = 'White'
+        elif carbBase == 2:
+            carbBase = 'Wheat'
+        elif carbBase == 3:
+            carbBase = 'Sourdough'
+        print(carbBase)
+        toppings=int(input("Please choose a topping:\n\n\n1. Steak\n2. Salami\n3. Veggie\n\n\nEnter Selection: "))
+        while toppings not in options:
+            toppings=int(input("Error: Invalid Selection.\n\n\n1. Steak\n2. Salami\n3. Veggie\n\n\nEnter Selection: "))
+        if toppings == 1:
+            toppings = 'Steak'
+        elif toppings == 2:
+            toppings = 'Salami'
+        elif toppings == 3:
+            toppings = 'Veggie'   
+        print(toppings)
+        quantity=int(input("How many do you want?\n\nEnter Number: "))
+        while quantity < 1 or quantity > 99:
+            quantity=int(input("Error: Invalid Number\n\nPleae enter a number between 1 and 99.\n\nEnter Number: "))
+        if quantity == 1:
+            print("\nYou want one {} sandwich on {}?".format(toppings, carbBase))
+        else:
+            print("\nYou want {} {} sandwiches on {} ?".format(quantity, toppings, carbBase))
+        confirm=input("Enter Y to confirm or N to start over: ")
+        if confirm in ['n','N']:
+            addItem(order)
+        if confirm in ['y','Y']:
+            sandwich=SandwichDirector.construct(carbBase,toppings, quantity, 6.99)
+            order.addOrderItem(sandwich)
+
+    print("\nHere is your current order:\n")
+    order.printItems()
+    print("Subtotal: {}".format(order.getSubtotal()))
+    addOrCheckout=input("\nWould you like to [A]dd more items or [C]heck Out? ")
+    if addOrCheckout in ['a','A']:
+        addItem(order)
+    if addOrCheckout in ['c','C']:
+        checkout(order)
+
+def checkout(order):
+    print("\n\n\nCheckout\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\nYour total is ${}.".format(order.getSubtotal()))
+
+    cod=input("Would you like to Pay [N]ow or Pay [L]ater? ")
+    if cod in ['n','N']:
+        payment=input("Please enter your credit card number: ")
+        exp=input("Please enter the expiration date (MM/YY): ")
+        ccv=input("Please enter the CVV: ")
+        CCinfo=(payment + exp + ccv)
+        order.payOrder(CCinfo)
+    session.add(order)
+    print("\n\n\nThank you! Your order has been placed.\n~~~~~~~~~~~~~~~~~~~~~~~~~~~\n\nTracker:\n\n{}".format(order))
+    time.sleep(3)
+    login()
 
 
 def main():
@@ -357,8 +493,7 @@ def main():
     Session = sessionmaker(bind=engine)
     session = Session()
 
-
-    welcome()
+    login()
 
 
     # alex = PeopleFactory.create('customer', 'Alex', 'McKenzie', 9522613456, '1017 Raymond Ave, Apt 10, Saint Paul, MN 55114', 3942730, 1234567890)
@@ -385,8 +520,5 @@ def main():
             InventoryItem(name="Coke 2L", qty=17, unitOfMeasure="bottles", unitPrice=2.49, type="Drink")
 
         ])    
-    # search InventoryItem table for Veggie toppings and print the result
-    searchresult=session.query(InventoryItem).filter_by(type='Veggie').all()
-    print(searchresult)
 
 main()
