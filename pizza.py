@@ -77,9 +77,6 @@ class Person(Base):
         else:
             return "customer"
 
-    def get_orders(self):
-        orders = session.query(Orders).filer_by()
-
 
     
     
